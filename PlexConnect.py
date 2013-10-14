@@ -18,138 +18,149 @@ import DNSServer, WebServer
 import Settings
 from Debug import *  # dprint()
 
-
-
-def getIP_self():
-    cfg = param['CSettings']
-    if cfg.getSetting('enable_plexconnect_autodetect')=='True':
-        # get public ip of machine running PlexConnect
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('1.2.3.4', 1000))
-        IP = s.getsockname()[0]
-        dprint('PlexConnect', 0, "IP_self: "+IP)
-    else:
-        # manual override from "settings.cfg"
-        IP = cfg.getSetting('ip_plexconnect')
-        dprint('PlexConnect', 0, "IP_self (from settings): "+IP)
+class PlexConnect(object):
     
-    return IP
-
-
-
-procs = {}
-pipes = {}
-param = {}
-running = False
-
-def startup():
-    global procs
-    global pipes
-    global param
-    global running
-    
-    # Settings
-    cfg = Settings.CSettings()
-    param['CSettings'] = cfg
-    
-    # Logfile
-    if cfg.getSetting('logpath').startswith('.'):
-        # relative to current path
-        logpath = sys.path[0] + sep + cfg.getSetting('logpath')
-    else:
-        # absolute path
-        logpath = cfg.getSetting('logpath')
-    
-    param['LogFile'] = logpath + sep + 'PlexConnect.log'
-    param['LogLevel'] = cfg.getSetting('loglevel')
-    dinit('PlexConnect', param, True)  # init logging, new file, main process
-    
-    # more Settings
-    param['IP_self'] = getIP_self()
-    param['HostToIntercept'] = 'trailers.apple.com'
-    param['HostOfPlexConnect'] = 'atv.plexconnect'
-    
-    running = True
-    
-    # init DNSServer
-    if cfg.getSetting('enable_dnsserver')=='True':
-        master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-DNSServer
-        proc = Process(target=DNSServer.Run, args=(slave, param))
-        proc.start()
+    def __init__(self, logger=dprint):
+        signal.signal(signal.SIGINT, self.sighandler_shutdown)
+        signal.signal(signal.SIGTERM, self.sighandler_shutdown)
         
-        time.sleep(0.1)
-        if proc.is_alive():
-            procs['DNSServer'] = proc
-            pipes['DNSServer'] = master
-        else:
-            dprint('PlexConnect', 0, "DNSServer not alive. Shutting down.")
-            running = False
+        self.logger = logger
     
-    # init WebServer
-    if running:
-        master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-WebServer
-        proc = Process(target=WebServer.Run, args=(slave, param))
-        proc.start()
+        self.logger('PlexConnect', 0, "***")
+        self.logger('PlexConnect', 0, "PlexConnect")
+        self.logger('PlexConnect', 0, "Press CTRL-C to shut down.")
+        self.logger('PlexConnect', 0, "***")
+    
+        self.procs = {}
+        self.pipes = {}
+        self.param = {}
+        self.running = False
         
-        time.sleep(0.1)
-        if proc.is_alive():
-            procs['WebServer'] = proc
-            pipes['WebServer'] = master
-        else:
-            dprint('PlexConnect', 0, "WebServer not alive. Shutting down.")
-            running = False
+        success = self.startup()
     
-    # init WebServer_SSL
-    if running and \
-       cfg.getSetting('enable_webserver_ssl')=='True':
-        master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-WebServer
-        proc = Process(target=WebServer.Run_SSL, args=(slave, param))
-        proc.start()
+        if success:
+            self.run()
         
-        time.sleep(0.1)
-        if proc.is_alive():
-            procs['WebServer_SSL'] = proc
-            pipes['WebServer_SSL'] = master
-        else:
-            dprint('PlexConnect', 0, "WebServer_SSL not alive. Shutting down.")
-            running = False
-    
-    # not started successful - clean up
-    if not running:
-        cmdShutdown()
-        shutdown()
-    
-    return running
+            self.shutdown()
 
-def run():
-    while running:
-        # do something important
-        try:
-            time.sleep(60)
-        except IOError as e:
-            if e.errno == errno.EINTR and not running:
-                pass  # mask "IOError: [Errno 4] Interrupted function call"
+    def getIP_self(self):
+        cfg = self.param['CSettings']
+        if cfg.getSetting('enable_plexconnect_autodetect')=='True':
+            # get public ip of machine running PlexConnect
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('1.2.3.4', 1000))
+            IP = s.getsockname()[0]
+            self.logger('PlexConnect', 0, "IP_self: "+IP)
+        else:
+            # manual override from "settings.cfg"
+            IP = cfg.getSetting('ip_plexconnect')
+            self.logger('PlexConnect', 0, "IP_self (from settings): "+IP)
+    
+        return IP
+
+
+    def startup(self):
+        # Settings
+        cfg = Settings.CSettings()
+        self.param['CSettings'] = cfg
+    
+        # Logfile
+        if cfg.getSetting('logpath').startswith('.'):
+            # relative to current path
+            logpath = sys.path[0] + sep + cfg.getSetting('logpath')
+        else:
+            # absolute path
+            logpath = cfg.getSetting('logpath')
+    
+        self.param['LogFile'] = logpath + sep + 'PlexConnect.log'
+        self.param['LogLevel'] = cfg.getSetting('loglevel')
+        self.logger('PlexConnect', self.param, True)  # init logging, new file, main process
+    
+        # more Settings
+        self.param['IP_self'] = self.getIP_self()
+        self.param['HostToIntercept'] = 'trailers.apple.com'
+        self.param['HostOfPlexConnect'] = 'atv.plexconnect'
+    
+        self.running = True
+    
+        # init DNSServer
+        if cfg.getSetting('enable_dnsserver')=='True':
+            master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-DNSServer
+            proc = Process(target=DNSServer.Run, args=(slave, self.param))
+            proc.start()
+        
+            time.sleep(0.1)
+            if proc.is_alive():
+                self.procs['DNSServer'] = proc
+                self.pipes['DNSServer'] = master
             else:
-                raise
+                self.logger('PlexConnect', 0, "DNSServer not alive. Shutting down.")
+                self.running = False
+    
+        # init WebServer
+        if self.running:
+            master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-WebServer
+            proc = Process(target=WebServer.Run, args=(slave, self.param))
+            proc.start()
+        
+            time.sleep(0.1)
+            if proc.is_alive():
+                self.procs['WebServer'] = proc
+                self.pipes['WebServer'] = master
+            else:
+                self.logger('PlexConnect', 0, "WebServer not alive. Shutting down.")
+                self.running = False
+    
+        # init WebServer_SSL
+        if self.running and \
+           cfg.getSetting('enable_webserver_ssl')=='True':
+            master, slave = Pipe()  # endpoint [0]-PlexConnect, [1]-WebServer
+            proc = Process(target=WebServer.Run_SSL, args=(slave, self.param))
+            proc.start()
+        
+            time.sleep(0.1)
+            if proc.is_alive():
+                self.procs['WebServer_SSL'] = proc
+                self.pipes['WebServer_SSL'] = master
+            else:
+                self.logger('PlexConnect', 0, "WebServer_SSL not alive. Shutting down.")
+                self.running = False
+    
+        # not started successful - clean up
+        if not self.running:
+            self.cmdShutdown()
+            self.shutdown()
+    
+        return self.running
 
-def shutdown():
-    for slave in procs:
-        procs[slave].join()
-    dprint('PlexConnect', 0, "shutdown")
+    def run(self):
+        while self.running:
+            # do something important
+            try:
+                time.sleep(60)
+            except IOError as e:
+                if e.errno == errno.EINTR and not self.running:
+                    pass  # mask "IOError: [Errno 4] Interrupted function call"
+                else:
+                    raise
 
-def cmdShutdown():
-    global running
-    running = False
-    # send shutdown to all pipes
-    for slave in pipes:
-        pipes[slave].send('shutdown')
-    dprint('PlexConnect', 0, "Shutting down.")
+    def shutdown(self):
+        for slave in self.procs:
+            self.procs[slave].join()
+        self.logger('PlexConnect', 0, "shutdown")
+
+    def cmdShutdown(self):
+        self.unning = False
+        # send shutdown to all pipes
+        for slave in self.pipes:
+            self.pipes[slave].send('shutdown')
+        self.logger('PlexConnect', 0, "Shutting down.")
 
 
 
-def sighandler_shutdown(signum, frame):
-    signal.signal(signal.SIGINT, signal.SIG_IGN)  # we heard you!
-    cmdShutdown()
+    def sighandler_shutdown(self, signum, frame):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # we heard you!
+        self.cmdShutdown()
 
 
 
