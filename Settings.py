@@ -41,6 +41,9 @@ g_settings = [
     \
     ('loglevel'        , ('Normal', '((Off)|(Normal)|(High))')),
     ('logpath'         , ('.', '.+')),
+    \
+    ('filter_connections'           , ('True', '((True)|(False))')),
+    ('filter'          , ('.', '.+')),
     ]
 
 

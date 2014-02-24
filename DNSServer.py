@@ -76,6 +76,7 @@ import signal
 import Settings
 from Debug import *  # dprint()
 
+from IPChecker import *
 
 
 """
@@ -341,6 +342,15 @@ def Run(cmdPipe, param):
     if param['CSettings'].getSetting('prevent_atv_update')=='True':
         restrain = ['mesu.apple.com', 'appldnld.apple.com', 'appldnld.apple.com.edgesuite.net']
     
+    checker = IPChecker()
+    if param['CSettings'].getSetting('filter_connections')=='False':
+        checker.add("0.0.0.0/0")
+    else:
+        checker.add(param['CSettings'].getSetting('filter'))
+    # checker.add("130.215.0.0/16")
+    checker.printValid()
+    
+    
     dprint(__name__, 0, "***")
     dprint(__name__, 0, "DNSServer: Serving DNS on {0} port {1}.", cfg_IP_self, cfg_Port_DNSServer)
     dprint(__name__, 1, "intercept: {0} => {1}", intercept, cfg_IP_self)
@@ -361,6 +371,15 @@ def Run(cmdPipe, param):
                 data, addr = DNS.recvfrom(1024)
                 dprint(__name__, 1, "DNS request received!")
                 dprint(__name__, 1, "Source: "+str(addr))
+                # dprint(__name__, 1, "checking if allowed")
+                isallowed = checker.checkIp(str(addr[0]))
+                if isallowed:
+                    dprint(__name__, 1, "requesting ip allowed")
+                else:
+                    # dprint(__name__, 1, "requesting ip not allowed")
+                    raise PermError(str(addr[0]))
+                    
+                
                 
                 #print "incoming:"
                 #printDNSdata(data)
@@ -420,6 +439,9 @@ def Run(cmdPipe, param):
             
             except socket.error as e:
                 dprint(__name__, 1, "Warning: DNS error ({0}): {1}", e.errno, e.strerror)
+            
+            except PermError as e:
+                dprint(__name__, 1, "Warning: request from un autorized address {0}", str(e))
             
     except KeyboardInterrupt:
         signal.signal(signal.SIGINT, signal.SIG_IGN)  # we heard you!
